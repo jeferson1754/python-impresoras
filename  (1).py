@@ -7,7 +7,7 @@ driver = webdriver.Chrome()
 
 try:
     # Navegar a la página web
-    driver.get("http://192.168.111.210/sws/index.sws")
+    driver.get("http://192.168.20.11/sws/index.sws")
     
     try:
         # Cambiar al iframe usando el nombre
@@ -15,7 +15,7 @@ try:
         
         try:
             # Encontrar el elemento y obtener el texto
-            black_and_white_counter = driver.find_element(By.CSS_SELECTOR, "td.tonervalue_number").text
+            black_and_white_counter = driver.find_element(By.CSS_SELECTOR, "table#toner_list td.jqgtd td.tonervalue_cyan").text
             color_counter = driver.find_element(By.CSS_SELECTOR, "table#imagine_list td.tonervalue_number").text
             
             # Imprimir los resultados

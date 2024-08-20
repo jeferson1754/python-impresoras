@@ -7,6 +7,12 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from datetime import datetime
+
+# Obtener la fecha y hora actual
+timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
 
 # Función para formatear direcciones IP
 def format_ip(ip):
@@ -60,7 +66,7 @@ driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), opti
 def fetch_data_from_url(ip):
     url = ip_to_url(ip)
     if not url:
-        return {"IP": ip, "Toner Restante": "", "Unidad de Imagen Restante": ""}
+        return {"IP": ip, "Toner Restante": "", "Unidad de Imagen Restante": "", 'Estado': ""}
 
     print(f"Procesando URL: {url}")  # Añade un registro para URLs que se están procesando
     try:
@@ -77,13 +83,13 @@ def fetch_data_from_url(ip):
             EC.visibility_of_element_located((By.CSS_SELECTOR, "table#imagine_list td.tonervalue_number"))
         ).text
 
-        return {"IP": ip, "Toner Restante": black_and_white_counter, "Unidad de Imagen Restante": color_counter}
+        return {"IP": ip, "Toner Restante": black_and_white_counter, "Unidad de Imagen Restante": color_counter, 'Estado': 'OK'}
     except NoSuchElementException:
-        return {"IP": ip, "Toner Restante": "Error", "Unidad de Imagen Restante": "Error"}
+        return {"IP": ip, "Toner Restante": "", "Unidad de Imagen Restante": "" , 'Estado': 'Error'}
     except TimeoutException:
-        return {"IP": ip, "Toner Restante": "No Disponible", "Unidad de Imagen Restante": "No Disponible"}
+        return {"IP": ip, "Toner Restante": "", "Unidad de Imagen Restante": "", 'Estado': 'No Disponible'}
     except WebDriverException:
-        return {"IP": ip, "Toner Restante": "Fuera de Red", "Unidad de Imagen Restante": "Fuera de Red"}
+        return {"IP": ip, "Toner Restante": "", "Unidad de Imagen Restante": "", 'Estado': 'Fuera de Red'}
 
 # Obtener resultados para cada IP
 results = [fetch_data_from_url(ip) for ip in df_filtered['IP']]
@@ -95,9 +101,12 @@ df_updated = df_original.merge(df_results, on='IP', how='left', suffixes=('', '_
 # Actualizar las columnas existentes
 df_updated['Toner Restante'] = df_updated['Toner Restante_new']
 df_updated['Unidad de Imagen Restante'] = df_updated['Unidad de Imagen Restante_new']
+df_updated['Estado'] = df_updated['Estado_new']
+# Añadir o actualizar la columna de marca de tiempo en df_updated
+df_updated['Marca de Tiempo'] = timestamp
 
 # Eliminar columnas auxiliares
-df_updated = df_updated.drop(columns=['Toner Restante_new', 'Unidad de Imagen Restante_new'])
+df_updated = df_updated.drop(columns=['Toner Restante_new', 'Unidad de Imagen Restante_new', 'Estado_new'])
 
 # Sobrescribir el archivo original con los resultados actualizados
 df_updated.to_excel(output_file, index=False)
