@@ -35,7 +35,7 @@ def format_ip(ip):
         return f"{ip[:3]}.{ip[3:6]}.{ip[6:]}"
     else:
         return ip
-    
+
 def fetch_data_from_url(ip):
     url = f"http://{ip}" if ip else None
     if not url:
@@ -84,6 +84,52 @@ def convert_to_percentage(value):
     else:
         return value
 
+def get_column_widths(ws):
+    widths = {}
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter  # Get the column name
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(cell.value)
+            except:
+                pass
+        widths[column] = max_length + 2  # Adding a bit more space
+    return widths
+
+def preserve_formulas_and_formats(input_file):
+    wb = load_workbook(input_file, data_only=False)
+    formulas = {}
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        sheet_formulas = {}
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.data_type == 'f':  # Verificar si la celda tiene fórmula
+                    sheet_formulas[cell.coordinate] = cell.formula
+                else:
+                    sheet_formulas[cell.coordinate] = cell.value
+        formulas[sheet_name] = sheet_formulas
+
+    return formulas
+
+def apply_formulas_and_formats(output_file, formulas):
+    wb = load_workbook(output_file, data_only=False)
+
+    for sheet_name, sheet_formulas in formulas.items():
+        ws = wb[sheet_name]
+
+        for cell_coord, formula in sheet_formulas.items():
+            cell = ws[cell_coord]
+            if formula is not None:
+                if isinstance(formula, str) and formula.startswith('='):
+                    cell.formula = formula
+                else:
+                    cell.value = formula
+
+    wb.save(output_file)
 
 if __name__ == "__main__":
     input_file = r'C:\Users\jvargas\Desktop\Impresoras-normal.xlsx'
@@ -134,10 +180,11 @@ if __name__ == "__main__":
     df_updated['UI Negro'] = df_updated['UI Negro'].apply(convert_to_percentage)
 
     # Guardar el DataFrame actualizado en un archivo Excel
-    df_updated.to_excel(output_file, index=False)
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        df_updated.to_excel(writer, sheet_name='Sheet1', index=False)
 
     # Aplicar formato rojo a los valores '0%' y '0'
-    wb = load_workbook(output_file)
+    wb = load_workbook(output_file, data_only=False)
     ws = wb.active
 
     # Define el formato de texto rojo
@@ -145,13 +192,21 @@ if __name__ == "__main__":
 
     # Imprimir información para depuración
     print("Aplicando formato a los valores '0%' y '0':")
-
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
         for cell in row:
-            # Convertir el valor a texto para la comparación
             cell_value = str(cell.value).strip()
             if cell_value in ['0%', '0']:
                 cell.font = red_font
                 print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}'")
 
+    # Ajustar el ancho de las columnas
+    column_widths = get_column_widths(ws)
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+
+    # Guardar el archivo Excel con los formatos aplicados
     wb.save(output_file)
+
+    # Aplicar fórmulas y formatos preservados
+    formulas = preserve_formulas_and_formats(input_file)
+    apply_formulas_and_formats(output_file, formulas)
