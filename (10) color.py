@@ -16,12 +16,15 @@ from openpyxl.styles import Font
 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 def format_ip(ip):
-    if pd.isna(ip) or not ip.strip():
-        return None  # Retorna None si la IP está vacía o solo tiene espacios
+    if pd.isna(ip):
+        return None
+    
+    ip = str(ip)  # Convertir a cadena
+    if not ip.strip():
+        return None
 
     ip = re.sub(r'\D', '', ip)
     
-    # Validar longitud y formatear la IP
     if len(ip) == 12:
         return f"{ip[:3]}.{ip[3:6]}.{ip[6:9]}.{ip[9:]}"
     elif len(ip) == 11:
@@ -36,6 +39,7 @@ def format_ip(ip):
         return f"{ip[:3]}.{ip[3:6]}.{ip[6:]}"
     else:
         return ip
+
 
 def clean_percentage(value):
     try:
@@ -136,7 +140,7 @@ def apply_formulas_and_formats(output_file, formulas):
     wb.save(output_file)
 
 if __name__ == "__main__":
-    input_file = r'C:\Users\jvargas\Desktop\Impresoras-color.xlsx'
+    input_file = r'C:\Users\jvargas\Desktop\Impresoras - final.xlsx'
     output_file = input_file
 
     # Leer todas las hojas del archivo Excel
@@ -150,7 +154,7 @@ if __name__ == "__main__":
         column_widths[sheet_name] = get_column_widths(ws)
 
     # Obtener la primera hoja
-    df_original = sheets['Consumibles']
+    df_original = sheets['Impresoras a Color']
     
     # Formatear IPs y filtrar datos
     df_original['IP'] = df_original['IP'].astype(str).apply(lambda x: format_ip(x) if pd.notna(x) else x)
@@ -182,11 +186,11 @@ if __name__ == "__main__":
 
     # Guardar el DataFrame actualizado en la hoja correcta
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-        df_updated.to_excel(writer, sheet_name='Consumibles', index=False)
+        df_updated.to_excel(writer, sheet_name='Impresoras a Color', index=False)
 
         # Escribir las demás hojas que ya estaban en el archivo
         for sheet_name, df_sheet in sheets.items():
-            if sheet_name != 'Consumibles':
+            if sheet_name != 'Impresoras a Color':
                 df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
 
     # Aplicar formato rojo a los valores '0%' y '0'

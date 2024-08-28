@@ -16,8 +16,12 @@ from openpyxl.styles import Font
 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 def format_ip(ip):
-    if pd.isna(ip) or not ip.strip():
-        return None  # Retorna None si la IP está vacía o solo tiene espacios
+    if pd.isna(ip):
+        return None
+    
+    ip = str(ip)  # Convertir a cadena
+    if not ip.strip():
+        return None
 
     ip = re.sub(r'\D', '', ip)
     
@@ -36,6 +40,7 @@ def format_ip(ip):
     else:
         return ip
 
+
 def fetch_data_from_url(ip):
     url = f"http://{ip}" if ip else None
     if not url:
@@ -52,7 +57,7 @@ def fetch_data_from_url(ip):
             black_and_white_counter = WebDriverWait(driver, 5).until(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, "table#toner_list td.tonervalue_number"))
             ).text
-        except (NoSuchElementException, TimeoutException):
+        except (NoSuchElementException):
             black_and_white_counter = "0%"
 
         # Intentar obtener el valor del contador de color
@@ -60,7 +65,7 @@ def fetch_data_from_url(ip):
             color_counter = WebDriverWait(driver, 5).until(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, "table#imagine_list td.tonervalue_number"))
             ).text
-        except (NoSuchElementException, TimeoutException):
+        except (NoSuchElementException):
             color_counter = "0%"
 
         return {"IP": ip, "Toner Negro": black_and_white_counter, "UI Negro": color_counter, 'Estado': 'OK', 'Marca de Tiempo': timestamp}
