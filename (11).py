@@ -17,29 +17,8 @@ timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def format_ip(ip):
-    if pd.isna(ip):
-        return None
 
-    ip = str(ip)  # Convertir a cadena
-    if not ip.strip():
-        return None
-
-    ip = re.sub(r'\D', '', ip)
-
-    if len(ip) == 12:
-        return f"{ip[:3]}.{ip[3:6]}.{ip[6:9]}.{ip[9:]}"
-    elif len(ip) == 11:
-        return f"{ip[:3]}.{ip[3:6]}.{ip[6:9]}.{ip[9:]}"
-    elif len(ip) == 10:
-        return f"{ip[:3]}.{ip[3:6]}.{ip[6:8]}.{ip[8:]}"
-    elif len(ip) == 9:
-        return f"{ip[:3]}.{ip[3:6]}.{ip[6:8]}.{ip[8:]}"
-    elif len(ip) == 8:
-        return f"{ip[:3]}.{ip[3:6]}.{ip[6:]}"
-    elif len(ip) == 7:
-        return f"{ip[:3]}.{ip[3:6]}.{ip[6:]}"
-    else:
-        return ip
+    return ip
 
 
 def get_column_widths(ws):
@@ -62,8 +41,7 @@ def preserve_formulas_and_formats(input_file):
     formulas = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        sheet_formulas = {cell.coordinate: cell.formula if cell.data_type ==
-                          'f' else cell.value for row in ws.iter_rows() for cell in row}
+        sheet_formulas = {cell.coordinate: cell.formula if cell.data_type == 'f' else cell.value for row in ws.iter_rows() for cell in row}
         formulas[sheet_name] = sheet_formulas
     return formulas
 
@@ -139,8 +117,7 @@ def procesar_impresoras_normales(file_path):
             return value
 
     # Leer solo la hoja "Impresoras Normales"
-    df_original = pd.read_excel(file_path, sheet_name='Impresoras Normales', dtype={
-                                "Toner Negro": str, "UI Negro": str})
+    df_original = pd.read_excel(file_path, sheet_name='Impresoras Normales')
 
     # Formatear las IPs
     df_original['IP'] = df_original['IP'].astype(str).apply(
@@ -355,9 +332,12 @@ def procesar_impresoras_colores_clx(file_path, output_file):
         driver = webdriver.Chrome(service=Service(
             ChromeDriverManager().install()), options=options)
 
-        driver.get(url)
+     
 
         try:
+            
+            driver.get(url)
+            
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located(
                     (By.CSS_SELECTOR, ".x-grid3-row:nth-child(1) .x-column:nth-child(2)"))
@@ -379,23 +359,26 @@ def procesar_impresoras_colores_clx(file_path, output_file):
                 By.CSS_SELECTOR, ".x-grid3-row:nth-child(4) .x-column:nth-child(2)").text
             #print(f"Toner Amarillo encontrado: {toner_amarillo}")
 
-        except NoSuchElementException:
-            toner_negro = ""
-            toner_cian = ""
-            toner_magenta = ""
-            toner_amarillo = ""
-            print(f"Elementos de toner no encontrados para la IP {ip}.")
 
-        return {
-            "IP": ip,  # Asegurando que 'IP' esté en el resultado
-            "Toner Negro": toner_negro,
-            "Toner Cian": toner_cian,
-            "Toner Magenta": toner_magenta,
-            "Toner Amarillo": toner_amarillo,
-            'Estado': 'OK' if toner_negro or toner_cian or toner_magenta or toner_amarillo else 'No disponible',
-            'Marca de Tiempo': timestamp
-        }
-    
+            return {
+                "IP": ip,  # Asegurando que 'IP' esté en el resultado
+                "Toner Negro": toner_negro,
+                "Toner Cian": toner_cian,
+                "Toner Magenta": toner_magenta,
+                "Toner Amarillo": toner_amarillo,
+                'Estado': 'OK' if toner_negro or toner_cian or toner_magenta or toner_amarillo else 'No disponible',
+                'Marca de Tiempo': timestamp
+            }
+        except (NoSuchElementException):
+            return {"IP": ip, "Toner Negro": "", "Toner Cian": "", "Toner Magenta": "", "Toner Amarillo": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except TimeoutException:
+            return {"IP": ip, "Toner Negro": "", "Toner Cian": "", "Toner Magenta": "", "Toner Amarillo": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except WebDriverException:
+            print(f"Timeout al intentar conectar con {url}")
+            return {"IP": ip, "Toner Negro": "", "Toner Cian": "", "Toner Magenta": "", "Toner Amarillo": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
+        finally:
+            driver.quit()
+        
     # Leer las hojas del archivo Excel
     sheets = pd.read_excel(file_path, sheet_name=None)
     wb = load_workbook(file_path)
