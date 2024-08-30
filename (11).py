@@ -17,8 +17,25 @@ timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def format_ip(ip):
+    if pd.isna(ip) or not ip.strip():
+        return None  # Retorna None si la IP está vacía o solo tiene espacios
 
-    return ip
+    ip = re.sub(r'\D', '', ip)
+    
+    if len(ip) == 12:
+        return f"{ip[:3]}.{ip[3:6]}.{ip[6:9]}.{ip[9:]}"
+    elif len(ip) == 11:
+        return f"{ip[:3]}.{ip[3:6]}.{ip[6:9]}.{ip[9:]}"
+    elif len(ip) == 10:
+        return f"{ip[:3]}.{ip[3:6]}.{ip[6:8]}.{ip[8:]}"
+    elif len(ip) == 9:
+        return f"{ip[:3]}.{ip[3:6]}.{ip[6:8]}.{ip[8:]}"
+    elif len(ip) == 8:
+        return f"{ip[:3]}.{ip[3:6]}.{ip[6:]}"
+    elif len(ip) == 7:
+        return f"{ip[:3]}.{ip[3:6]}.{ip[6:]}"
+    else:
+        return ip
 
 
 def get_column_widths(ws):
@@ -171,34 +188,39 @@ def procesar_impresoras_normales(file_path):
     df_updated['UI Negro'] = df_updated['UI Negro'].apply(
         convert_to_percentage)
 
-    # Guardar el DataFrame actualizado en la hoja "Impresoras Normales"
     with pd.ExcelWriter(file_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
         df_updated.to_excel(
             writer, sheet_name='Impresoras Normales', index=False)
 
-    # Aplicar formato rojo a los valores '0%' y '0' solo en la hoja "Impresoras Normales"
-    wb = load_workbook(file_path, data_only=False)
-    ws = wb['Impresoras Normales']
+    # Cargar el archivo Excel
+    wb = load_workbook(file_path)
 
-    # Define el formato de texto rojo
+    # Obtener la lista de nombres de hojas
+    sheet_names = wb.sheetnames
+
+    # Mover "Impresoras Normales" al principio si no está allí
+    if "Impresoras Normales" in sheet_names and sheet_names.index("Impresoras Normales") != 0:
+        wb.move_sheet("Impresoras Normales", offset=-sheet_names.index("Impresoras Normales"))
+
+    # Aplicar formato rojo a los valores '0%' y '0' en todas las hojas
     red_font = Font(color="FF0000")
+    print("Aplicando formato a los valores '0%' y '0' en todas las hojas:")
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        print(f"Procesando hoja: {sheet_name}")
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+            for cell in row:
+                cell_value = str(cell.value).strip()
+                if cell_value in ['0%', '0']:
+                    cell.font = red_font
+                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
 
-    # Imprimir información para depuración
-    print("Aplicando formato a los valores '0%' y '0':")
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-        for cell in row:
-            cell_value = str(cell.value).strip()
-            if cell_value in ['0%', '0']:
-                cell.font = red_font
-                print(f"Formato aplicado a celda: {
-                      cell.coordinate}, Valor: '{cell_value}'")
+        # Ajustar el ancho de las columnas para cada hoja
+        column_widths = get_column_widths(ws)
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
 
-    # Ajustar el ancho de las columnas solo en la hoja "Impresoras Normales"
-    column_widths = get_column_widths(ws)
-    for col, width in column_widths.items():
-        ws.column_dimensions[col].width = width
-
-    # Guardar el archivo Excel con los formatos aplicados
+    # Guardar el archivo Excel con los formatos aplicados y el nuevo orden de hojas
     wb.save(file_path)
 
     # Aplicar fórmulas y formatos preservados
@@ -464,7 +486,8 @@ def procesar_impresoras_colores_clx(file_path, output_file):
 
 input_file = r'C:\Users\jvargas\Desktop\Impresoras - final.xlsx'
 
-
-procesar_impresoras_normales(input_file)
-procesar_impresoras_colores(input_file, input_file)
 procesar_impresoras_colores_clx(input_file, input_file)
+procesar_impresoras_colores(input_file, input_file)
+procesar_impresoras_normales(input_file)
+
+

@@ -132,7 +132,7 @@ def apply_formulas_and_formats(output_file, formulas):
     wb.save(output_file)
 
 if __name__ == "__main__":
-    input_file = r'C:\Users\jvargas\Desktop\Impresoras-normal.xlsx'
+    input_file = r'C:\Users\jvargas\Desktop\Impresoras - final.xlsx'
     output_file = input_file
 
     # Leer el archivo Excel original
