@@ -192,41 +192,9 @@ def procesar_impresoras_normales(file_path):
         df_updated.to_excel(
             writer, sheet_name='Impresoras Normales', index=False)
 
-    # Cargar el archivo Excel
-    wb = load_workbook(file_path)
-
-    # Obtener la lista de nombres de hojas
-    sheet_names = wb.sheetnames
-
-    # Mover "Impresoras Normales" al principio si no está allí
-    if "Impresoras Normales" in sheet_names and sheet_names.index("Impresoras Normales") != 0:
-        wb.move_sheet("Impresoras Normales", offset=-sheet_names.index("Impresoras Normales"))
-
-    # Aplicar formato rojo a los valores '0%' y '0' en todas las hojas
-    red_font = Font(color="FF0000")
-    print("Aplicando formato a los valores '0%' y '0' en todas las hojas:")
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        print(f"Procesando hoja: {sheet_name}")
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-            for cell in row:
-                cell_value = str(cell.value).strip()
-                if cell_value in ['0%', '0']:
-                    cell.font = red_font
-                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
-
-        # Ajustar el ancho de las columnas para cada hoja
-        column_widths = get_column_widths(ws)
-        for col, width in column_widths.items():
-            ws.column_dimensions[col].width = width
-
-    # Guardar el archivo Excel con los formatos aplicados y el nuevo orden de hojas
-    wb.save(file_path)
-
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(file_path, formulas)
-
 
 def procesar_impresoras_colores(file_path, output_file):
 
@@ -314,22 +282,6 @@ def procesar_impresoras_colores(file_path, output_file):
         for sheet_name, df_sheet in sheets.items():
             if sheet_name != 'Impresoras a Color':
                 df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
-
-    # Aplicar formato rojo a los valores '0%' y '0'
-    wb = load_workbook(output_file, data_only=False)
-    red_font = Font(color="FF0000")
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        print(f"Aplicando formato a la hoja: {sheet_name}")
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-            for cell in row:
-                if str(cell.value).strip() in ['0%', '0']:
-                    cell.font = red_font
-                    print(f"Formato aplicado a celda: {
-                          cell.coordinate}, Valor: '{cell.value}'")
-        for col, width in column_widths.get(sheet_name, {}).items():
-            ws.column_dimensions[col].width = width
-        wb.save(output_file)
 
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
@@ -463,31 +415,42 @@ def procesar_impresoras_colores_clx(file_path, output_file):
             if sheet_name != 'Impresora CLX-6260':
                 df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    # Aplicar formato rojo a los valores '0%' y '0'
-    wb = load_workbook(output_file, data_only=False)
-    red_font = Font(color="FF0000")
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        print(f"Aplicando formato a la hoja: {sheet_name}")
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-            for cell in row:
-                if str(cell.value).strip() in ['0%', '0']:
-                    cell.font = red_font
-                    print(f"Formato aplicado a celda: {
-                          cell.coordinate}, Valor: '{cell.value}'")
-        for col, width in column_widths.get(sheet_name, {}).items():
-            ws.column_dimensions[col].width = width
-        wb.save(output_file)
-
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
+    
+def format_excel_sheets(file_path):
+    wb = load_workbook(file_path)
+    red_font = Font(color="FF0000")
 
+    print("Aplicando formato a todas las hojas:")
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        print(f"Procesando hoja: {sheet_name}")
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+            for cell in row:
+                cell_value = str(cell.value).strip()
+                if cell_value in ['0%', '0']:
+                    cell.font = red_font
+                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
+
+        # Ajustar el ancho de las columnas para cada hoja
+        column_widths = get_column_widths(ws)
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
+
+    # Asegurar que "Impresoras Normales" esté al principio
+    if "Impresoras Normales" in wb.sheetnames:
+        wb.move_sheet("Impresoras Normales", offset=-wb.index(wb["Impresoras Normales"]))
+
+    wb.save(file_path)
+    print("Formato aplicado y archivo guardado.")
 
 input_file = r'C:\Users\jvargas\Desktop\Impresoras - final.xlsx'
 
 procesar_impresoras_colores_clx(input_file, input_file)
 procesar_impresoras_colores(input_file, input_file)
 procesar_impresoras_normales(input_file)
+format_excel_sheets(input_file)
 
 
