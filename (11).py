@@ -446,7 +446,7 @@ def format_excel_sheets(file_path):
     wb.save(file_path)
     print("Formato aplicado y archivo guardado.")
 
-input_file = r'C:\Users\jvargas\Desktop\Impresoras - final.xlsx'
+input_file = r'G:\Mi unidad\Impresoras - final.xlsx'
 
 procesar_impresoras_colores_clx(input_file, input_file)
 procesar_impresoras_colores(input_file, input_file)
