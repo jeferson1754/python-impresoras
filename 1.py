@@ -422,6 +422,7 @@ def procesar_impresoras_colores_clx(file_path, output_file):
 def format_excel_sheets(file_path):
     wb = load_workbook(file_path)
     red_font = Font(color="FF0000")
+    orange_font = Font(color="ff6f00")
 
     print("Aplicando formato a todas las hojas:")
     for sheet_name in wb.sheetnames:
@@ -430,10 +431,16 @@ def format_excel_sheets(file_path):
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
             for cell in row:
                 cell_value = str(cell.value).strip()
+              # Comprobar si el valor es '0%' o '0' para aplicar el texto rojo
                 if cell_value in ['0%', '0']:
                     cell.font = red_font
                     print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
 
+                # Comprobar si el valor es menor al 5% para aplicar el texto naranja
+                elif cell_value.endswith('%') and float(cell_value[:-1]) < 5:
+                    cell.font = orange_font
+                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
+                    
         # Ajustar el ancho de las columnas para cada hoja
         column_widths = get_column_widths(ws)
         for col, width in column_widths.items():
