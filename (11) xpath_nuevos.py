@@ -85,28 +85,30 @@ def procesar_impresoras_normales(file_path):
             return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': '', 'Marca de Tiempo': ""}
 
         print(f"Procesando URL: {url}")
-        driver = webdriver.Chrome(service=Service(
-            ChromeDriverManager().install()), options=options)
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         try:
             driver.get(url)
-            WebDriverWait(driver, 5).until(
-                EC.frame_to_be_available_and_switch_to_it((By.ID, "ruifw_MainFrm")))
+            WebDriverWait(driver, 5).until(EC.frame_to_be_available_and_switch_to_it((By.ID, "ruifw_MainFrm")))
 
-            # Intentar obtener el valor del contador negro y blanco
+            # Intentar obtener el valor del contador negro
             try:
-                black_and_white_counter = WebDriverWait(driver, 5).until(
+                black_counter_element = WebDriverWait(driver, 5).until(
                     EC.visibility_of_element_located(
-                        (By.CSS_SELECTOR, "table#toner_list td.tonervalue_number"))
-                ).text
+                        (By.XPATH, "//table[@id='toner_list']//td[@class='tonervalue_number'][1]")
+                    )
+                )
+                black_and_white_counter = black_counter_element.text
             except (NoSuchElementException):
                 black_and_white_counter = "0%"
 
             # Intentar obtener el valor del contador de color
             try:
-                color_counter = WebDriverWait(driver, 5).until(
+                color_counter_element = WebDriverWait(driver, 5).until(
                     EC.visibility_of_element_located(
-                        (By.CSS_SELECTOR, "table#imagine_list td.tonervalue_number"))
-                ).text
+                        (By.XPATH, "//table[@id='imagine_list']//td[@class='tonervalue_number'][1]")
+                    )
+                )
+                color_counter = color_counter_element.text
             except (NoSuchElementException):
                 color_counter = "0%"
 
@@ -195,6 +197,7 @@ def procesar_impresoras_normales(file_path):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(file_path, formulas)
+
 
 def procesar_impresoras_colores(file_path, output_file):
 
@@ -286,6 +289,7 @@ def procesar_impresoras_colores(file_path, output_file):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
+
 
 def procesar_impresoras_colores_clx(file_path, output_file):
     
@@ -419,10 +423,10 @@ def procesar_impresoras_colores_clx(file_path, output_file):
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
     
+    
 def format_excel_sheets(file_path):
     wb = load_workbook(file_path)
     red_font = Font(color="FF0000")
-    orange_font = Font(color="ff6f00")
 
     print("Aplicando formato a todas las hojas:")
     for sheet_name in wb.sheetnames:
@@ -431,16 +435,10 @@ def format_excel_sheets(file_path):
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
             for cell in row:
                 cell_value = str(cell.value).strip()
-              # Comprobar si el valor es '0%' o '0' para aplicar el texto rojo
                 if cell_value in ['0%', '0']:
                     cell.font = red_font
                     print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
 
-                # Comprobar si el valor es menor al 5% para aplicar el texto naranja
-                elif cell_value.endswith('%') and float(cell_value[:-1]) < 5:
-                    cell.font = orange_font
-                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
-                    
         # Ajustar el ancho de las columnas para cada hoja
         column_widths = get_column_widths(ws)
         for col, width in column_widths.items():
