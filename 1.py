@@ -98,8 +98,17 @@ def procesar_impresoras_normales(file_path):
                     EC.visibility_of_element_located(
                         (By.CSS_SELECTOR, "table#toner_list td.tonervalue_number"))
                 ).text
-            except (NoSuchElementException):
-                black_and_white_counter = "0%"
+            except (NoSuchElementException, TimeoutException):
+                try:
+                    # Buscar el segundo fallback: el <td> que contiene "0%" directamente
+                    fallback_element = WebDriverWait(driver, 3).until(
+                        EC.visibility_of_element_located(
+                            (By.XPATH, '//table[@width="100%" and @border="0"]//td[contains(text(), "0%")]')
+                        )
+                    )
+                    black_and_white_counter = fallback_element.text
+                except (NoSuchElementException, TimeoutException):
+                    black_and_white_counter = "0%"
 
             # Intentar obtener el valor del contador de color
             try:
@@ -455,8 +464,8 @@ def format_excel_sheets(file_path):
 
 input_file = r'G:\Unidades compartidas\Informática\Impresoras - final.xlsx'
 
-procesar_impresoras_colores_clx(input_file, input_file)
-procesar_impresoras_colores(input_file, input_file)
+#procesar_impresoras_colores_clx(input_file, input_file)
+#procesar_impresoras_colores(input_file, input_file)
 procesar_impresoras_normales(input_file)
 format_excel_sheets(input_file)
 

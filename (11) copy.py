@@ -21,7 +21,7 @@ def format_ip(ip):
         return None  # Retorna None si la IP está vacía o solo tiene espacios
 
     ip = re.sub(r'\D', '', ip)
-    
+
     if len(ip) == 12:
         return f"{ip[:3]}.{ip[3:6]}.{ip[6:9]}.{ip[9:]}"
     elif len(ip) == 11:
@@ -58,7 +58,8 @@ def preserve_formulas_and_formats(input_file):
     formulas = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        sheet_formulas = {cell.coordinate: cell.formula if cell.data_type == 'f' else cell.value for row in ws.iter_rows() for cell in row}
+        sheet_formulas = {cell.coordinate: cell.formula if cell.data_type ==
+                          'f' else cell.value for row in ws.iter_rows() for cell in row}
         formulas[sheet_name] = sheet_formulas
     return formulas
 
@@ -85,35 +86,44 @@ def procesar_impresoras_normales(file_path):
             return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': '', 'Marca de Tiempo': ""}
 
         print(f"Procesando URL: {url}")
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver = webdriver.Chrome(service=Service(
+            ChromeDriverManager().install()), options=options)
         try:
             driver.get(url)
-            WebDriverWait(driver, 5).until(EC.frame_to_be_available_and_switch_to_it((By.ID, "ruifw_MainFrm")))
+            WebDriverWait(driver, 5).until(
+                EC.frame_to_be_available_and_switch_to_it(
+                    (By.ID, "ruifw_MainFrm"))
+            )
 
-            # Intentar obtener el valor del contador negro
+            # Inicializar los contadores
+            black_and_white_counter = "0%"
+            color_counter = "0%"
+
+            # Intentar obtener el valor del contador negro y blanco
             try:
-                black_counter_element = WebDriverWait(driver, 5).until(
+                black_and_white_counter = WebDriverWait(driver, 5).until(
                     EC.visibility_of_element_located(
-                        (By.XPATH, "//table[@id='toner_list']//td[@class='tonervalue_number'][1]")
-                    )
-                )
-                black_and_white_counter = black_counter_element.text
-            except (NoSuchElementException):
-                black_and_white_counter = "0%"
+                        (By.CSS_SELECTOR, "table#toner_list td.tonervalue_number"))
+                ).text
+            except NoSuchElementException:
+                pass  # Se mantiene "0%" por defecto
 
             # Intentar obtener el valor del contador de color
             try:
-                color_counter_element = WebDriverWait(driver, 5).until(
+                color_counter = WebDriverWait(driver, 5).until(
                     EC.visibility_of_element_located(
-                        (By.XPATH, "//table[@id='imagine_list']//td[@class='tonervalue_number'][1]")
-                    )
-                )
-                color_counter = color_counter_element.text
-            except (NoSuchElementException):
-                color_counter = "0%"
+                        (By.CSS_SELECTOR, "table#imagine_list td.tonervalue_number"))
+                ).text
+            except NoSuchElementException:
+                pass  # Se mantiene "0%" por defecto
+
+            # Verificar si ambos contadores son "0%"
+            if black_and_white_counter == "0%" and color_counter == "0%":
+                return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
 
             return {"IP": ip, "Toner Negro": black_and_white_counter, "UI Negro": color_counter, 'Estado': 'OK', 'Marca de Tiempo': timestamp}
-        except (NoSuchElementException, TimeoutException):
+
+        except (TimeoutException):
             return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
         except WebDriverException:
             return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
@@ -292,7 +302,7 @@ def procesar_impresoras_colores(file_path, output_file):
 
 
 def procesar_impresoras_colores_clx(file_path, output_file):
-    
+
     def clean_percentage(value: str) -> str:
         try:
             if isinstance(value, str):
@@ -300,7 +310,7 @@ def procesar_impresoras_colores_clx(file_path, output_file):
             return f"{int(round(float(value)))}%"
         except ValueError:
             return ""
-    
+
     def fetch_data_from_url(ip, options):
         url = f"http://{ip}" if ip else None
         if not url:
@@ -310,12 +320,10 @@ def procesar_impresoras_colores_clx(file_path, output_file):
         driver = webdriver.Chrome(service=Service(
             ChromeDriverManager().install()), options=options)
 
-     
-
         try:
-            
+
             driver.get(url)
-            
+
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located(
                     (By.CSS_SELECTOR, ".x-grid3-row:nth-child(1) .x-column:nth-child(2)"))
@@ -323,20 +331,19 @@ def procesar_impresoras_colores_clx(file_path, output_file):
 
             toner_negro = driver.find_element(
                 By.CSS_SELECTOR, ".x-grid3-row:nth-child(1) .x-column:nth-child(2)").text
-            #print(f"Toner Negro encontrado: {toner_negro}")
+            # print(f"Toner Negro encontrado: {toner_negro}")
 
             toner_cian = driver.find_element(
                 By.CSS_SELECTOR, ".x-grid3-row:nth-child(2) .x-column:nth-child(2)").text
-            #print(f"Toner Cian encontrado: {toner_cian}")
+            # print(f"Toner Cian encontrado: {toner_cian}")
 
             toner_magenta = driver.find_element(
                 By.CSS_SELECTOR, ".x-grid3-row:nth-child(3) .x-column:nth-child(2)").text
-            #print(f"Toner Magenta encontrado: {toner_magenta}")
+            # print(f"Toner Magenta encontrado: {toner_magenta}")
 
             toner_amarillo = driver.find_element(
                 By.CSS_SELECTOR, ".x-grid3-row:nth-child(4) .x-column:nth-child(2)").text
-            #print(f"Toner Amarillo encontrado: {toner_amarillo}")
-
+            # print(f"Toner Amarillo encontrado: {toner_amarillo}")
 
             return {
                 "IP": ip,  # Asegurando que 'IP' esté en el resultado
@@ -356,7 +363,7 @@ def procesar_impresoras_colores_clx(file_path, output_file):
             return {"IP": ip, "Toner Negro": "", "Toner Cian": "", "Toner Magenta": "", "Toner Amarillo": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
         finally:
             driver.quit()
-        
+
     # Leer las hojas del archivo Excel
     sheets = pd.read_excel(file_path, sheet_name=None)
     wb = load_workbook(file_path)
@@ -422,11 +429,12 @@ def procesar_impresoras_colores_clx(file_path, output_file):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
-    
-    
+
+
 def format_excel_sheets(file_path):
     wb = load_workbook(file_path)
     red_font = Font(color="FF0000")
+    orange_font = Font(color="ff6f00")
 
     print("Aplicando formato a todas las hojas:")
     for sheet_name in wb.sheetnames:
@@ -435,9 +443,17 @@ def format_excel_sheets(file_path):
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
             for cell in row:
                 cell_value = str(cell.value).strip()
+              # Comprobar si el valor es '0%' o '0' para aplicar el texto rojo
                 if cell_value in ['0%', '0']:
                     cell.font = red_font
-                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
+                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{
+                          cell_value}' en hoja {sheet_name}")
+
+                # Comprobar si el valor es menor al 5% para aplicar el texto naranja
+                elif cell_value.endswith('%') and float(cell_value[:-1]) < 5:
+                    cell.font = orange_font
+                    print(f"Formato aplicado a celda: {cell.coordinate}, Valor: '{
+                          cell_value}' en hoja {sheet_name}")
 
         # Ajustar el ancho de las columnas para cada hoja
         column_widths = get_column_widths(ws)
@@ -446,10 +462,12 @@ def format_excel_sheets(file_path):
 
     # Asegurar que "Impresoras Normales" esté al principio
     if "Impresoras Normales" in wb.sheetnames:
-        wb.move_sheet("Impresoras Normales", offset=-wb.index(wb["Impresoras Normales"]))
+        wb.move_sheet("Impresoras Normales", offset=-
+                      wb.index(wb["Impresoras Normales"]))
 
     wb.save(file_path)
     print("Formato aplicado y archivo guardado.")
+
 
 input_file = r'G:\Unidades compartidas\Informática\Impresoras - final.xlsx'
 
@@ -457,5 +475,3 @@ procesar_impresoras_colores_clx(input_file, input_file)
 procesar_impresoras_colores(input_file, input_file)
 procesar_impresoras_normales(input_file)
 format_excel_sheets(input_file)
-
-
