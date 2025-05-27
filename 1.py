@@ -15,6 +15,29 @@ from openpyxl.styles import Font
 # Obtener la fecha y hora actual
 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+num_version = "137.0.7151.41"
+
+CHROMEDRIVER_PATH = ChromeDriverManager(
+    driver_version=num_version).install()
+
+
+def configurar_driver(num_version: str):
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--no-sandbox')  # útil en algunos entornos Linux
+    # mejora en entornos con pocos recursos
+    options.add_argument('--disable-dev-shm-usage')
+    # asegura resolución adecuada en modo headless
+    options.add_argument('--window-size=1920,1080')
+
+    driver = webdriver.Chrome(
+        service=Service(CHROMEDRIVER_PATH),
+        options=options
+    )
+
+    return driver
+
 
 def format_ip(ip):
     if pd.isna(ip) or not ip.strip():
@@ -81,19 +104,23 @@ def apply_formulas_and_formats(output_file, formulas):
 def procesar_impresoras_normales(file_path):
 
     def fetch_data_from_url(ip):
+
         url = f"http://{ip}" if ip else None
         if not url:
             return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': '', 'Marca de Tiempo': ""}
 
         print(f"Procesando URL: {url}")
-        driver = webdriver.Chrome(service=Service(
-            ChromeDriverManager().install()), options=options)
+        # Asegúrate de que num_version esté definido en el entorno global
+        driver = configurar_driver(num_version)
+
         try:
             driver.get(url)
             WebDriverWait(driver, 5).until(
-                EC.frame_to_be_available_and_switch_to_it((By.ID, "ruifw_MainFrm")))
+                EC.frame_to_be_available_and_switch_to_it(
+                    (By.ID, "ruifw_MainFrm"))
+            )
 
-            # Intentar obtener el valor del contador negro y blanco
+            # Toner negro
             try:
                 black_and_white_counter = WebDriverWait(driver, 5).until(
                     EC.visibility_of_element_located(
@@ -101,18 +128,16 @@ def procesar_impresoras_normales(file_path):
                 ).text
             except (NoSuchElementException, TimeoutException):
                 try:
-                    # Buscar el segundo fallback: el <td> que contiene "0%" directamente
                     fallback_element = WebDriverWait(driver, 3).until(
                         EC.visibility_of_element_located(
-                            (By.XPATH,
-                             '//table[@width="100%" and @border="0"]//td[contains(text(), "0%")]')
+                            (By.XPATH, '//td[@width="*" and @style="text-align:left;vertical-align:middle;" and contains(text(), "0%")]')
                         )
                     )
                     black_and_white_counter = fallback_element.text
                 except (NoSuchElementException, TimeoutException):
                     black_and_white_counter = "0%"
 
-            # Intentar obtener el valor del contador de color
+            # UI Negro (Color)
             try:
                 color_counter = WebDriverWait(driver, 5).until(
                     EC.visibility_of_element_located(
@@ -120,7 +145,6 @@ def procesar_impresoras_normales(file_path):
                 ).text
             except (NoSuchElementException, TimeoutException):
                 try:
-                    # Buscar el segundo fallback: el <td> que contiene "0%" directamente
                     fallback_element = WebDriverWait(driver, 3).until(
                         EC.visibility_of_element_located(
                             (By.XPATH,
@@ -131,98 +155,105 @@ def procesar_impresoras_normales(file_path):
                 except (NoSuchElementException, TimeoutException):
                     color_counter = "0%"
 
-            # Determinar el estado basado en los contadores
+            # Determinar estado
             estado = 'OK'
-            if color_counter == "0%":
-                estado = 'Sin UI'
-            if black_and_white_counter == "0%":
-                estado = 'Sin Toner'
             if color_counter == "0%" and black_and_white_counter == "0%":
                 estado = 'Sin UI y Sin Toner'
+            elif color_counter == "0%":
+                estado = 'Sin UI'
+            elif black_and_white_counter == "0%":
+                estado = 'Sin Toner'
 
-            return {"IP": ip, "Toner Negro": black_and_white_counter, "UI Negro": color_counter, 'Estado': estado, 'Marca de Tiempo': timestamp}
+            return {
+                "IP": ip,
+                "Toner Negro": black_and_white_counter,
+                "UI Negro": color_counter,
+                'Estado': estado,
+                'Marca de Tiempo': timestamp
+            }
+
         except (NoSuchElementException, TimeoutException):
-            return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+            return {
+                "IP": ip,
+                "Toner Negro": "",
+                "UI Negro": "",
+                'Estado': 'No Disponible',
+                'Marca de Tiempo': timestamp
+            }
         except WebDriverException:
-            return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
+            return {
+                "IP": ip,
+                "Toner Negro": "",
+                "UI Negro": "",
+                'Estado': 'Fuera de Red',
+                'Marca de Tiempo': timestamp
+            }
         finally:
             driver.quit()
 
     def convert_to_percentage(value):
         if pd.isna(value) or value is None:
-            return ""  # Deja la celda vacía
+            return ""
         elif isinstance(value, (int, float)):
             return f"{int(value * 100)}%"
         elif isinstance(value, str):
             try:
-                # Convertir de cadena a número, manejando coma como punto decimal
-                number = float(value.replace(',', '.'))
-                return f"{int(number * 100)}%"
+                number = float(value.replace(',', '.').replace('%', ''))
+                return f"{int(number)}%"
             except ValueError:
                 return value
         else:
             return value
 
-    # Leer solo la hoja "Impresoras Normales"
+    # Leer hoja
     df_original = pd.read_excel(file_path, sheet_name='Impresoras Normales')
-
-    # Formatear las IPs
     df_original['IP'] = df_original['IP'].astype(str).apply(
         lambda x: format_ip(x) if pd.notna(x) else x)
     df_filtered = df_original[df_original['IP'].notna()]
 
-    # Configuración de Selenium
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-
-    # Ejecutar la función en paralelo
+    # Ejecutar en paralelo
     with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_ip = {executor.submit(
-            fetch_data_from_url, ip): ip for ip in df_filtered['IP']}
+        future_to_ip = {
+            executor.submit(fetch_data_from_url, ip): ip for ip in df_filtered['IP']
+        }
         results = [future.result() for future in as_completed(future_to_ip)]
 
-    # Crear un DataFrame con los resultados obtenidos
     df_results = pd.DataFrame(results)
 
-    # Combinar los resultados con el DataFrame original
+    # Unir resultados
     df_updated = df_original.merge(
         df_results, on='IP', how='left', suffixes=('', '_new'))
-
-    # Asegurarse de que las columnas estén en el tipo correcto antes de asignar
     df_updated['Toner Negro'] = df_updated['Toner Negro'].fillna(
         '').astype(str)
     df_updated['UI Negro'] = df_updated['UI Negro'].fillna('').astype(str)
 
-    # Actualizar 'Toner Negro' y 'UI Negro' solo si el estado es 'OK'
     mask_ok = df_updated['Estado_new'] == 'OK'
     df_updated.loc[mask_ok,
-                   'Toner Negro'] = df_updated.loc[mask_ok, 'Toner Negro_new']
+        'Toner Negro'] = df_updated.loc[mask_ok, 'Toner Negro_new']
     df_updated.loc[mask_ok,
-                   'UI Negro'] = df_updated.loc[mask_ok, 'UI Negro_new']
+        'UI Negro'] = df_updated.loc[mask_ok, 'UI Negro_new']
 
-    # Actualizar 'Estado' y 'Marca de Tiempo' para todos los casos
     df_updated['Estado'] = df_updated['Estado_new'].fillna(
         df_updated['Estado'])
     df_updated['Marca de Tiempo'] = df_updated['Marca de Tiempo_new'].fillna(
         df_updated['Marca de Tiempo'])
 
     # Eliminar columnas auxiliares
-    columns_to_drop = ['Toner Negro_new', 'UI Negro_new',
-                       'Estado_new', 'Marca de Tiempo_new']
-    df_updated = df_updated.drop(columns=columns_to_drop)
+    df_updated.drop(columns=['Toner Negro_new', 'UI Negro_new',
+                    'Estado_new', 'Marca de Tiempo_new'], inplace=True)
 
-    # Convertir valores decimales a porcentajes
+    # Formato porcentaje
     df_updated['Toner Negro'] = df_updated['Toner Negro'].apply(
         convert_to_percentage)
     df_updated['UI Negro'] = df_updated['UI Negro'].apply(
         convert_to_percentage)
 
+    # Guardar
     with pd.ExcelWriter(file_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
         df_updated.to_excel(
             writer, sheet_name='Impresoras Normales', index=False)
 
-    # Aplicar fórmulas y formatos preservados
+    # Aplicar formatos
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(file_path, formulas)
 
@@ -235,16 +266,15 @@ def procesar_impresoras_colores(file_path, output_file):
                 value = value.replace('%', '').strip()
             return f"{int(round(float(value)))}%"
         except ValueError:
-            return ""
+            return "0"
 
-    def fetch_data_from_url(ip: str, options: webdriver.ChromeOptions) -> dict:
+    def fetch_data_from_url(ip: str) -> dict:
         url = f"http://{ip}" if ip else None
         if not url:
             return {"IP": ip, "Toner Negro": "", "UI Negro": "", "Toner Cian": "", "UI Cian": "", "Toner Magenta": "", "UI Magenta": "", "Toner Amarillo": "", "UI Amarillo": "", 'Estado': '', 'Marca de Tiempo': ""}
 
         print(f"Procesando URL: {url}")
-        driver = webdriver.Chrome(service=Service(
-            ChromeDriverManager().install()), options=options)
+        driver = configurar_driver(num_version)
         try:
             driver.get(url)
             WebDriverWait(driver, 5).until(
@@ -276,13 +306,9 @@ def procesar_impresoras_colores(file_path, output_file):
     df_original['IP'] = df_original['IP'].astype(str).apply(format_ip)
     df_filtered = df_original[df_original['IP'].notna()]
 
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_ip = {executor.submit(
-            fetch_data_from_url, ip, options): ip for ip in df_filtered['IP']}
+            fetch_data_from_url, ip): ip for ip in df_filtered['IP']}
         results = [future.result() for future in as_completed(future_to_ip)]
 
     df_results = pd.DataFrame(results)
@@ -306,7 +332,27 @@ def procesar_impresoras_colores(file_path, output_file):
     df_updated.drop(columns=[
                     col for col in columns_to_drop if col in df_updated.columns], inplace=True)
 
-    # Guardar el DataFrame actualizado
+    # Evaluar estado según valores de Toner y UI
+
+    def evaluar_estado(row):
+        sin_toner = any(row[col] == "0%" for col in [
+                        'Toner Negro', 'Toner Cian', 'Toner Magenta', 'Toner Amarillo'])
+        sin_ui = any(row[col] == "0%" for col in ['UI Negro',
+                    'UI Cian', 'UI Magenta', 'UI Amarillo'])
+
+        if sin_toner and sin_ui:
+            return "Sin Toner y Sin UI"
+        elif sin_toner:
+            return "Sin Toner"
+        elif sin_ui:
+            return "Sin UI"
+        else:
+            return row['Estado']  # Mantener el estado original si no aplica
+
+
+    df_updated['Estado'] = df_updated.apply(evaluar_estado, axis=1)
+
+   # Guardar el DataFrame actualizado
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         df_updated.to_excel(
             writer, sheet_name='Impresoras a Color', index=False)
@@ -335,8 +381,7 @@ def procesar_impresoras_colores_clx(file_path, output_file):
             return {"IP": ip, "Toner Negro": "", "Toner Cian": "", "Toner Magenta": "", "Toner Amarillo": "", 'Estado': '', 'Marca de Tiempo': ""}
 
         print(f"Procesando URL: {url}")
-        driver = webdriver.Chrome(service=Service(
-            ChromeDriverManager().install()), options=options)
+        driver = configurar_driver(num_version)
 
         try:
 
@@ -487,9 +532,10 @@ def format_excel_sheets(file_path):
     print("Formato aplicado y archivo guardado.")
 
 
-input_file = r'G:\Unidades compartidas\Informática\Impresoras - final.xlsx'
+#input_file = r"C:\Users\jvargas\Downloads\Impresoras - final (2).xlsx"
+input_file = r"G:\Unidades compartidas\Informática\Impresoras - final.xlsx"
 
-# procesar_impresoras_colores_clx(input_file, input_file)
-# procesar_impresoras_colores(input_file, input_file)
+procesar_impresoras_colores_clx(input_file, input_file)
+procesar_impresoras_colores(input_file, input_file)
 procesar_impresoras_normales(input_file)
 format_excel_sheets(input_file)
