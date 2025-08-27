@@ -15,7 +15,7 @@ from openpyxl.styles import Font
 # Obtener la fecha y hora actual
 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-num_version = "137.0.7151.41"
+num_version = "139.0.7258.139"
 
 CHROMEDRIVER_PATH = ChromeDriverManager(
     driver_version=num_version).install()
@@ -29,7 +29,10 @@ def configurar_driver(num_version: str):
     # mejora en entornos con pocos recursos
     options.add_argument('--disable-dev-shm-usage')
     # asegura resolución adecuada en modo headless
-    options.add_argument('--window-size=1920,1080')
+    # options.add_argument('--window-size=1920,1080')
+    # options.add_argument('--window-size=1080,1080')
+    options.add_argument('--ignore-certificate-errors')  # Ignorar errores SSL
+    options.add_argument('--ignore-ssl-errors')
 
     driver = webdriver.Chrome(
         service=Service(CHROMEDRIVER_PATH),
@@ -101,164 +104,7 @@ def apply_formulas_and_formats(output_file, formulas):
     wb.save(output_file)
 
 
-def procesar_impresoras_normales(file_path):
-
-    def fetch_data_from_url(ip):
-
-        url = f"http://{ip}" if ip else None
-        if not url:
-            return {"IP": ip, "Toner Negro": "", "UI Negro": "", 'Estado': '', 'Marca de Tiempo': ""}
-
-        print(f"Procesando URL: {url}")
-        # Asegúrate de que num_version esté definido en el entorno global
-        driver = configurar_driver(num_version)
-
-        try:
-            driver.get(url)
-            WebDriverWait(driver, 5).until(
-                EC.frame_to_be_available_and_switch_to_it(
-                    (By.ID, "ruifw_MainFrm"))
-            )
-
-            # Toner negro
-            try:
-                black_and_white_counter = WebDriverWait(driver, 5).until(
-                    EC.visibility_of_element_located(
-                        (By.CSS_SELECTOR, "table#toner_list td.tonervalue_number"))
-                ).text
-            except (NoSuchElementException, TimeoutException):
-                try:
-                    fallback_element = WebDriverWait(driver, 3).until(
-                        EC.visibility_of_element_located(
-                            (By.XPATH, '//td[@width="*" and @style="text-align:left;vertical-align:middle;" and contains(text(), "0%")]')
-                        )
-                    )
-                    black_and_white_counter = fallback_element.text
-                except (NoSuchElementException, TimeoutException):
-                    black_and_white_counter = "0%"
-
-            # UI Negro (Color)
-            try:
-                color_counter = WebDriverWait(driver, 5).until(
-                    EC.visibility_of_element_located(
-                        (By.CSS_SELECTOR, "table#imagine_list td.tonervalue_number"))
-                ).text
-            except (NoSuchElementException, TimeoutException):
-                try:
-                    fallback_element = WebDriverWait(driver, 3).until(
-                        EC.visibility_of_element_located(
-                            (By.XPATH,
-                             '//table[@width="100%" and @border="0"]//td[contains(text(), "0%")]')
-                        )
-                    )
-                    color_counter = fallback_element.text
-                except (NoSuchElementException, TimeoutException):
-                    color_counter = "0%"
-
-            # Determinar estado
-            estado = 'OK'
-            if color_counter == "0%" and black_and_white_counter == "0%":
-                estado = 'Sin UI y Sin Toner'
-            elif color_counter == "0%":
-                estado = 'Sin UI'
-            elif black_and_white_counter == "0%":
-                estado = 'Sin Toner'
-
-            return {
-                "IP": ip,
-                "Toner Negro": black_and_white_counter,
-                "UI Negro": color_counter,
-                'Estado': estado,
-                'Marca de Tiempo': timestamp
-            }
-
-        except (NoSuchElementException, TimeoutException):
-            return {
-                "IP": ip,
-                "Toner Negro": "",
-                "UI Negro": "",
-                'Estado': 'No Disponible',
-                'Marca de Tiempo': timestamp
-            }
-        except WebDriverException:
-            return {
-                "IP": ip,
-                "Toner Negro": "",
-                "UI Negro": "",
-                'Estado': 'Fuera de Red',
-                'Marca de Tiempo': timestamp
-            }
-        finally:
-            driver.quit()
-
-    def convert_to_percentage(value):
-        if pd.isna(value) or value is None:
-            return ""
-        elif isinstance(value, (int, float)):
-            return f"{int(value * 100)}%"
-        elif isinstance(value, str):
-            try:
-                number = float(value.replace(',', '.').replace('%', ''))
-                return f"{int(number)}%"
-            except ValueError:
-                return value
-        else:
-            return value
-
-    # Leer hoja
-    df_original = pd.read_excel(file_path, sheet_name='Impresoras Normales')
-    df_original['IP'] = df_original['IP'].astype(str).apply(
-        lambda x: format_ip(x) if pd.notna(x) else x)
-    df_filtered = df_original[df_original['IP'].notna()]
-
-    # Ejecutar en paralelo
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_ip = {
-            executor.submit(fetch_data_from_url, ip): ip for ip in df_filtered['IP']
-        }
-        results = [future.result() for future in as_completed(future_to_ip)]
-
-    df_results = pd.DataFrame(results)
-
-    # Unir resultados
-    df_updated = df_original.merge(
-        df_results, on='IP', how='left', suffixes=('', '_new'))
-    df_updated['Toner Negro'] = df_updated['Toner Negro'].fillna(
-        '').astype(str)
-    df_updated['UI Negro'] = df_updated['UI Negro'].fillna('').astype(str)
-
-    mask_ok = df_updated['Estado_new'] == 'OK'
-    df_updated.loc[mask_ok,
-        'Toner Negro'] = df_updated.loc[mask_ok, 'Toner Negro_new']
-    df_updated.loc[mask_ok,
-        'UI Negro'] = df_updated.loc[mask_ok, 'UI Negro_new']
-
-    df_updated['Estado'] = df_updated['Estado_new'].fillna(
-        df_updated['Estado'])
-    df_updated['Marca de Tiempo'] = df_updated['Marca de Tiempo_new'].fillna(
-        df_updated['Marca de Tiempo'])
-
-    # Eliminar columnas auxiliares
-    df_updated.drop(columns=['Toner Negro_new', 'UI Negro_new',
-                    'Estado_new', 'Marca de Tiempo_new'], inplace=True)
-
-    # Formato porcentaje
-    df_updated['Toner Negro'] = df_updated['Toner Negro'].apply(
-        convert_to_percentage)
-    df_updated['UI Negro'] = df_updated['UI Negro'].apply(
-        convert_to_percentage)
-
-    # Guardar
-    with pd.ExcelWriter(file_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-        df_updated.to_excel(
-            writer, sheet_name='Impresoras Normales', index=False)
-
-    # Aplicar formatos
-    formulas = preserve_formulas_and_formats(file_path)
-    apply_formulas_and_formats(file_path, formulas)
-
-
-def procesar_impresoras_colores(file_path, output_file):
+def procesar_impresoras_hp(file_path, output_file):
 
     def clean_percentage(value: str) -> str:
         try:
@@ -266,32 +112,51 @@ def procesar_impresoras_colores(file_path, output_file):
                 value = value.replace('%', '').strip()
             return f"{int(round(float(value)))}%"
         except ValueError:
-            return "0"
+            return ""
 
-    def fetch_data_from_url(ip: str) -> dict:
+    def fetch_data_from_url(ip, options):
         url = f"http://{ip}" if ip else None
         if not url:
-            return {"IP": ip, "Toner Negro": "", "UI Negro": "", "Toner Cian": "", "UI Cian": "", "Toner Magenta": "", "UI Magenta": "", "Toner Amarillo": "", "UI Amarillo": "", 'Estado': '', 'Marca de Tiempo': ""}
+            return {"IP": ip, "Toner Negro": "", "Kit Mant.": "", "Kit Alim.": "", 'Estado': '', 'Marca de Tiempo': ""}
 
         print(f"Procesando URL: {url}")
         driver = configurar_driver(num_version)
+
         try:
+
             driver.get(url)
-            WebDriverWait(driver, 5).until(
-                EC.frame_to_be_available_and_switch_to_it((By.ID, "ruifw_MainFrm")))
 
-            data = {}
-            for idx, color in enumerate(['Negro', 'Cian', 'Magenta', 'Amarillo'], start=1):
-                data[f"Toner {color}"] = driver.find_element(
-                    By.XPATH, f"//tr[@id='{idx}']/td[2]/table/tbody/tr/td/table/tbody/tr/td[2]").text
-                data[f"UI {color}"] = driver.find_element(
-                    By.XPATH, f"(//tr[@id='{idx}']/td[2]/table/tbody/tr/td/table/tbody/tr/td[2])[2]").text
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "SupplyName0"))
+            )
 
-            return {**{"IP": ip, 'Estado': 'OK', 'Marca de Tiempo': timestamp}, **{key: clean_percentage(value) for key, value in data.items()}}
-        except (NoSuchElementException, TimeoutException):
-            return {"IP": ip, "Toner Negro": "", "UI Negro": "", "Toner Cian": "", "UI Cian": "", "Toner Magenta": "", "UI Magenta": "", "Toner Amarillo": "", "UI Amarillo": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+            # Toner negro
+            toner_negro = driver.find_element(By.ID, "SupplyGauge0").text
+            # print(f"Tóner Negro: {toner_negro}")
+
+            # Kit de mantenimiento
+            kit_mantenimiento = driver.find_element(By.ID, "SupplyGauge1").text
+            # print(f"Kit de mantenimiento: {kit_mantenimiento}")
+
+            # Kit alimentador documentos
+            kit_alimentador = driver.find_element(By.ID, "SupplyGauge2").text
+            # print(f"Kit alimentador documentos: {kit_alimentador}")
+
+            return {
+                "IP": ip,
+                "Toner Negro": toner_negro,
+                "Kit Mant.": kit_mantenimiento,
+                "Kit Alim.": kit_alimentador,
+                'Estado': 'OK' if toner_negro or kit_mantenimiento or kit_alimentador else 'No disponible',
+                'Marca de Tiempo': timestamp
+            }
+        except (NoSuchElementException):
+            return {"IP": ip, "Toner Negro": "", "Kit Mant.": "", "Kit Alim.": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except TimeoutException:
+            return {"IP": ip, "Toner Negro": "", "Kit Mant.": "", "Kit Alim.": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
         except WebDriverException:
-            return {"IP": ip, "Toner Negro": "", "UI Negro": "", "Toner Cian": "", "UI Cian": "", "Toner Magenta": "", "UI Magenta": "", "Toner Amarillo": "", "UI Amarillo": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
+            print(f"Timeout al intentar conectar con {url}")
+            return {"IP": ip, "Toner Negro": "", "Kit Mant.": "", "Kit Alim.": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
         finally:
             driver.quit()
 
@@ -301,24 +166,40 @@ def procesar_impresoras_colores(file_path, output_file):
     column_widths = {sheet_name: get_column_widths(
         wb[sheet_name]) for sheet_name in wb.sheetnames}
 
-    # Procesar la hoja 'Impresoras a Color'
-    df_original = sheets['Impresoras a Color']
+    # Procesar la hoja 'HP Admin'
+    df_original = sheets['HP Admin']
     df_original['IP'] = df_original['IP'].astype(str).apply(format_ip)
     df_filtered = df_original[df_original['IP'].notna()]
 
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_ip = {executor.submit(
-            fetch_data_from_url, ip): ip for ip in df_filtered['IP']}
+            fetch_data_from_url, ip, options): ip for ip in df_filtered['IP']}
         results = [future.result() for future in as_completed(future_to_ip)]
 
     df_results = pd.DataFrame(results)
+
+    # Verificar que las columnas 'IP' existan antes de hacer el merge
+    if 'IP' not in df_original.columns or 'IP' not in df_results.columns:
+        raise KeyError("'IP' column is missing in one of the DataFrames.")
+
+    # Fusionar los resultados
     df_updated = df_original.merge(
-        df_results, on='IP', how='left', suffixes=('', '_new'))
+        df_results, on='IP', how='left', suffixes=('', '_new')
+    )
+
+    # Restablecer columnas NaN
+    columns = ['Toner Negro', 'Kit Mant.',
+               'Kit Alim.', 'Estado', 'Marca de Tiempo']
+    df_updated[columns] = df_updated[columns].fillna('')
 
     mask_ok = df_updated['Estado_new'] == 'OK'
-    columns = ['Toner Negro', 'UI Negro', 'Toner Cian', 'UI Cian',
-               'Toner Magenta', 'UI Magenta', 'Toner Amarillo', 'UI Amarillo']
+    columns = ['Toner Negro', 'Kit Mant.', 'Kit Alim.']
     for col in columns:
+        df_updated[col] = df_updated[col].astype(str)
         df_updated.loc[mask_ok, col] = df_updated.loc[mask_ok,
                                                       f'{col}_new'].apply(clean_percentage)
 
@@ -332,32 +213,12 @@ def procesar_impresoras_colores(file_path, output_file):
     df_updated.drop(columns=[
                     col for col in columns_to_drop if col in df_updated.columns], inplace=True)
 
-    # Evaluar estado según valores de Toner y UI
-
-    def evaluar_estado(row):
-        sin_toner = any(row[col] == "0%" for col in [
-                        'Toner Negro', 'Toner Cian', 'Toner Magenta', 'Toner Amarillo'])
-        sin_ui = any(row[col] == "0%" for col in ['UI Negro',
-                    'UI Cian', 'UI Magenta', 'UI Amarillo'])
-
-        if sin_toner and sin_ui:
-            return "Sin Toner y Sin UI"
-        elif sin_toner:
-            return "Sin Toner"
-        elif sin_ui:
-            return "Sin UI"
-        else:
-            return row['Estado']  # Mantener el estado original si no aplica
-
-
-    df_updated['Estado'] = df_updated.apply(evaluar_estado, axis=1)
-
-   # Guardar el DataFrame actualizado
+    # Guardar el DataFrame actualizado
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         df_updated.to_excel(
-            writer, sheet_name='Impresoras a Color', index=False)
+            writer, sheet_name='HP Admin', index=False)
         for sheet_name, df_sheet in sheets.items():
-            if sheet_name != 'Impresoras a Color':
+            if sheet_name != 'HP Admin':
                 df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
 
     # Aplicar fórmulas y formatos preservados
@@ -365,7 +226,7 @@ def procesar_impresoras_colores(file_path, output_file):
     apply_formulas_and_formats(output_file, formulas)
 
 
-def procesar_impresoras_colores_clx(file_path, output_file):
+def procesar_impresoras_hp_grandes(file_path, output_file):
 
     def clean_percentage(value: str) -> str:
         try:
@@ -378,7 +239,7 @@ def procesar_impresoras_colores_clx(file_path, output_file):
     def fetch_data_from_url(ip, options):
         url = f"http://{ip}" if ip else None
         if not url:
-            return {"IP": ip, "Toner Negro": "", "Toner Cian": "", "Toner Magenta": "", "Toner Amarillo": "", 'Estado': '', 'Marca de Tiempo': ""}
+            return {"IP": ip, "Toner Negro": "", 'Estado': '', 'Marca de Tiempo': ""}
 
         print(f"Procesando URL: {url}")
         driver = configurar_driver(num_version)
@@ -388,33 +249,140 @@ def procesar_impresoras_colores_clx(file_path, output_file):
             driver.get(url)
 
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, ".x-grid3-row:nth-child(1) .x-column:nth-child(2)"))
+                EC.presence_of_element_located((By.ID, "SupplyName0"))
             )
 
-            toner_negro = driver.find_element(
-                By.CSS_SELECTOR, ".x-grid3-row:nth-child(1) .x-column:nth-child(2)").text
-            # print(f"Toner Negro encontrado: {toner_negro}")
-
-            toner_cian = driver.find_element(
-                By.CSS_SELECTOR, ".x-grid3-row:nth-child(2) .x-column:nth-child(2)").text
-            # print(f"Toner Cian encontrado: {toner_cian}")
-
-            toner_magenta = driver.find_element(
-                By.CSS_SELECTOR, ".x-grid3-row:nth-child(3) .x-column:nth-child(2)").text
-            # print(f"Toner Magenta encontrado: {toner_magenta}")
-
-            toner_amarillo = driver.find_element(
-                By.CSS_SELECTOR, ".x-grid3-row:nth-child(4) .x-column:nth-child(2)").text
-            # print(f"Toner Amarillo encontrado: {toner_amarillo}")
+            # Toner negro
+            toner_negro = driver.find_element(By.ID, "SupplyGauge0").text
+            # print(f"Tóner Negro: {toner_negro}")
 
             return {
-                "IP": ip,  # Asegurando que 'IP' esté en el resultado
+                "IP": ip,
+                "Toner Negro": toner_negro,
+                'Estado': 'OK' if toner_negro else 'No disponible',
+                'Marca de Tiempo': timestamp
+            }
+        except (NoSuchElementException):
+            return {"IP": ip, "Toner Negro": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except TimeoutException:
+            return {"IP": ip, "Toner Negro": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except WebDriverException:
+            print(f"Timeout al intentar conectar con {url}")
+            return {"IP": ip, "Toner Negro": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
+        finally:
+            driver.quit()
+
+    # Leer las hojas del archivo Excel
+    sheets = pd.read_excel(file_path, sheet_name=None)
+    wb = load_workbook(file_path)
+    column_widths = {sheet_name: get_column_widths(
+        wb[sheet_name]) for sheet_name in wb.sheetnames}
+
+    # Procesar la hoja 'HP Planta'
+    df_original = sheets['HP Planta']
+    df_original['IP'] = df_original['IP'].astype(str).apply(format_ip)
+    df_filtered = df_original[df_original['IP'].notna()]
+
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_ip = {executor.submit(
+            fetch_data_from_url, ip, options): ip for ip in df_filtered['IP']}
+        results = [future.result() for future in as_completed(future_to_ip)]
+
+    df_results = pd.DataFrame(results)
+
+    # Verificar que las columnas 'IP' existan antes de hacer el merge
+    if 'IP' not in df_original.columns or 'IP' not in df_results.columns:
+        raise KeyError("'IP' column is missing in one of the DataFrames.")
+
+    # Fusionar los resultados
+    df_updated = df_original.merge(
+        df_results, on='IP', how='left', suffixes=('', '_new')
+    )
+
+    # Restablecer columnas NaN
+    columns = ['Toner Negro', 'Estado', 'Marca de Tiempo']
+    df_updated[columns] = df_updated[columns].fillna('')
+
+    mask_ok = df_updated['Estado_new'] == 'OK'
+    columns = ['Toner Negro']
+    for col in columns:
+        df_updated[col] = df_updated[col].astype(str)
+        df_updated.loc[mask_ok, col] = df_updated.loc[mask_ok,
+                                                      f'{col}_new'].apply(clean_percentage)
+
+    df_updated['Estado'] = df_updated['Estado_new'].fillna(
+        df_updated['Estado'])
+    df_updated['Marca de Tiempo'] = df_updated['Marca de Tiempo_new'].fillna(
+        df_updated['Marca de Tiempo'])
+
+    columns_to_drop = [f'{col}_new' for col in columns +
+                       ['Estado', 'Marca de Tiempo']]
+    df_updated.drop(columns=[
+                    col for col in columns_to_drop if col in df_updated.columns], inplace=True)
+
+    # Guardar el DataFrame actualizado
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        df_updated.to_excel(
+            writer, sheet_name='HP Planta', index=False)
+        for sheet_name, df_sheet in sheets.items():
+            if sheet_name != 'HP Planta':
+                df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    # Aplicar fórmulas y formatos preservados
+    formulas = preserve_formulas_and_formats(file_path)
+    apply_formulas_and_formats(output_file, formulas)
+
+
+def procesar_color_admin(file_path, output_file):
+
+    def clean_percentage(value: str) -> str:
+        try:
+            if isinstance(value, str):
+                value = value.replace('%', '').strip()
+            return f"{int(round(float(value)))}%"
+        except (ValueError, TypeError):
+            return "0%"
+
+    def fetch_data_from_url(ip, options):
+        url = f"http://{ip}" if ip else None
+        if not url:
+            return {"IP": ip, "Toner Negro": "", "Toner Cian": "", "Toner Magenta": "", "Toner Amarillo": "",  'Estado': '', 'Marca de Tiempo': ""}
+
+        print(f"Procesando URL: {url}")
+        driver = configurar_driver(num_version)
+
+        try:
+
+            driver.get(url)
+
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "SupplyName0"))
+            )
+
+            # Toner negro
+            toner_negro = driver.find_element(By.ID, "SupplyGauge0").text
+            toner_cian = driver.find_element(By.ID, "SupplyGauge1").text
+            toner_magenta = driver.find_element(By.ID, "SupplyGauge2").text
+            toner_amarillo = driver.find_element(By.ID, "SupplyGauge3").text
+
+            '''
+            print(f"Tóner Negro: {toner_negro}")
+            print(f"Tóner Cian: {toner_cian}")
+            print(f"Tóner Magenta: {toner_magenta}")
+            print(f"Tóner Amarillo: {toner_amarillo}")
+            '''
+
+            return {
+                "IP": ip,
                 "Toner Negro": toner_negro,
                 "Toner Cian": toner_cian,
                 "Toner Magenta": toner_magenta,
                 "Toner Amarillo": toner_amarillo,
-                'Estado': 'OK' if toner_negro or toner_cian or toner_magenta or toner_amarillo else 'No disponible',
+                'Estado': 'OK' if toner_negro else 'No disponible',
                 'Marca de Tiempo': timestamp
             }
         except (NoSuchElementException):
@@ -433,8 +401,8 @@ def procesar_impresoras_colores_clx(file_path, output_file):
     column_widths = {sheet_name: get_column_widths(
         wb[sheet_name]) for sheet_name in wb.sheetnames}
 
-    # Procesar la hoja 'Impresoras a Color'
-    df_original = sheets['Impresora CLX-6260']
+    # Procesar la hoja 'Color Admin'
+    df_original = sheets['Color Admin']
     df_original['IP'] = df_original['IP'].astype(str).apply(format_ip)
     df_filtered = df_original[df_original['IP'].notna()]
 
@@ -464,8 +432,15 @@ def procesar_impresoras_colores_clx(file_path, output_file):
     df_updated[columns] = df_updated[columns].fillna('')
 
     mask_ok = df_updated['Estado_new'] == 'OK'
-    columns = ['Toner Negro', 'Toner Cian',
-               'Toner Magenta', 'Toner Amarillo']
+    columns = ['Toner Negro', 'Toner Cian', 'Toner Magenta', 'Toner Amarillo']
+
+    # 🔹 Crear las columnas *_new si no existen
+    for col in columns:
+        new_col = f"{col}_new"
+        if new_col not in df_updated.columns:
+            df_updated[new_col] = None
+
+    # 🔹 Actualizar valores
     for col in columns:
         df_updated[col] = df_updated[col].astype(str)
         df_updated.loc[mask_ok, col] = df_updated.loc[mask_ok,
@@ -484,9 +459,259 @@ def procesar_impresoras_colores_clx(file_path, output_file):
     # Guardar el DataFrame actualizado
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         df_updated.to_excel(
-            writer, sheet_name='Impresora CLX-6260', index=False)
+            writer, sheet_name='Color Admin', index=False)
         for sheet_name, df_sheet in sheets.items():
-            if sheet_name != 'Impresora CLX-6260':
+            if sheet_name != 'Color Admin':
+                df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    # Aplicar fórmulas y formatos preservados
+    formulas = preserve_formulas_and_formats(file_path)
+    apply_formulas_and_formats(output_file, formulas)
+
+
+def procesar_planta(file_path, output_file):
+
+    def clean_percentage(value: str) -> str:
+        try:
+            if isinstance(value, str):
+                value = value.replace('%', '').strip()
+            return f"{int(round(float(value)))}%"
+        except ValueError:
+            return ""
+
+    def fetch_data_from_url(ip, options):
+        url = f"http://{ip}" if ip else None
+        if not url:
+            return {"IP": ip, "Toner Negro": "", "Kit Alim.": "", 'Estado': '', 'Marca de Tiempo': ""}
+
+        print(f"Procesando URL: {url}")
+        driver = configurar_driver(num_version)
+
+        try:
+
+            driver.get(url)
+
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "SupplyName0"))
+            )
+
+            # Toner negro
+            toner_negro = driver.find_element(By.ID, "SupplyGauge0").text
+            # print(f"Tóner Negro: {toner_negro}")
+
+            # Kit de mantenimiento
+            kit_alimentador = driver.find_element(By.ID, "SupplyGauge1").text
+            # print(f"Kit de mantenimiento: {kit_mantenimiento}")
+
+            return {
+                "IP": ip,
+                "Toner Negro": toner_negro,
+                "Kit Alim.": kit_alimentador,
+                'Estado': 'OK' if toner_negro or kit_alimentador else 'No disponible',
+                'Marca de Tiempo': timestamp
+            }
+        except (NoSuchElementException):
+            return {"IP": ip, "Toner Negro": "", "Kit Alim.": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except TimeoutException:
+            return {"IP": ip, "Toner Negro": "", "Kit Alim.": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except WebDriverException:
+            print(f"Timeout al intentar conectar con {url}")
+            return {"IP": ip, "Toner Negro": "", "Kit Alim.": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
+        finally:
+            driver.quit()
+
+    # Leer las hojas del archivo Excel
+    sheets = pd.read_excel(file_path, sheet_name=None)
+    wb = load_workbook(file_path)
+    column_widths = {sheet_name: get_column_widths(
+        wb[sheet_name]) for sheet_name in wb.sheetnames}
+
+    # Procesar la hoja 'HP Planta - 2'
+    df_original = sheets['HP Planta - 2']
+    df_original['IP'] = df_original['IP'].astype(str).apply(format_ip)
+    df_filtered = df_original[df_original['IP'].notna()]
+
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_ip = {executor.submit(
+            fetch_data_from_url, ip, options): ip for ip in df_filtered['IP']}
+        results = [future.result() for future in as_completed(future_to_ip)]
+
+    df_results = pd.DataFrame(results)
+
+    # Verificar que las columnas 'IP' existan antes de hacer el merge
+    if 'IP' not in df_original.columns or 'IP' not in df_results.columns:
+        raise KeyError("'IP' column is missing in one of the DataFrames.")
+
+    # Fusionar los resultados
+    df_updated = df_original.merge(
+        df_results, on='IP', how='left', suffixes=('', '_new')
+    )
+
+    # Restablecer columnas NaN
+    columns = ['Toner Negro', 'Kit Alim.', 'Estado', 'Marca de Tiempo']
+    df_updated[columns] = df_updated[columns].fillna('')
+
+    mask_ok = df_updated['Estado_new'] == 'OK'
+    columns = ['Toner Negro', 'Kit Alim.']
+    for col in columns:
+        df_updated[col] = df_updated[col].astype(str)
+        df_updated.loc[mask_ok, col] = df_updated.loc[mask_ok,
+                                                      f'{col}_new'].apply(clean_percentage)
+
+    df_updated['Estado'] = df_updated['Estado_new'].fillna(
+        df_updated['Estado'])
+    df_updated['Marca de Tiempo'] = df_updated['Marca de Tiempo_new'].fillna(
+        df_updated['Marca de Tiempo'])
+
+    columns_to_drop = [f'{col}_new' for col in columns +
+                       ['Estado', 'Marca de Tiempo']]
+    df_updated.drop(columns=[
+                    col for col in columns_to_drop if col in df_updated.columns], inplace=True)
+
+    # Guardar el DataFrame actualizado
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        df_updated.to_excel(
+            writer, sheet_name='HP Planta - 2', index=False)
+        for sheet_name, df_sheet in sheets.items():
+            if sheet_name != 'HP Planta - 2':
+                df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    # Aplicar fórmulas y formatos preservados
+    formulas = preserve_formulas_and_formats(file_path)
+    apply_formulas_and_formats(output_file, formulas)
+
+
+def procesar_color_planta(file_path, output_file):
+
+    def clean_percentage(value: str) -> str:
+        try:
+            if isinstance(value, str):
+                value = value.replace('%', '').strip()
+            return f"{int(round(float(value)))}%"
+        except (ValueError, TypeError):
+            return "0%"
+
+    def fetch_data_from_url(ip, options):
+        url = f"http://{ip}" if ip else None
+        if not url:
+            return {"IP": ip, "Toner Amarillo": "", "Toner Magenta": "", "Toner Cian": "", "Toner Negro": "", "Kit Alim.": "", 'Estado': '', 'Marca de Tiempo': ""}
+
+        print(f"Procesando URL: {url}")
+        driver = configurar_driver(num_version)
+
+        try:
+
+            driver.get(url)
+
+            # Esperar a que cargue el primer consumible
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "SupplyName0"))
+            )
+
+            toner_amarillo = driver.find_element(By.ID, "SupplyGauge0").text
+            toner_magenta = driver.find_element(By.ID, "SupplyGauge1").text
+            toner_cian = driver.find_element(By.ID, "SupplyGauge2").text
+            toner_negro = driver.find_element(By.ID, "SupplyGauge3").text
+            kit_alimentador = driver.find_element(By.ID, "SupplyGauge4").text
+
+            '''
+            print(f"Tóner Amarillo: {toner_amarillo}")
+            print(f"Tóner Magenta: {toner_magenta}")
+            print(f"Tóner Cian: {toner_cian}")
+            print(f"Tóner Negro: {toner_negro}")
+            print(f"Kit alimentador: {kit_alimentador}")
+            '''
+
+            return {
+                "IP": ip,
+                "Toner Amarillo": toner_amarillo,
+                "Toner Magenta": toner_magenta,
+                "Toner Cian": toner_cian,
+                "Toner Negro": toner_negro,
+                "Kit Alim.": kit_alimentador,
+                'Estado': 'OK' if toner_amarillo else 'No disponible',
+                'Marca de Tiempo': timestamp
+            }
+        except (NoSuchElementException):
+            return {"IP": ip, "Toner Amarillo": "", "Toner Magenta": "", "Toner Cian": "", "Toner Negro": "", "Kit Alim.": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except TimeoutException:
+            return {"IP": ip, "Toner Amarillo": "", "Toner Magenta": "", "Toner Cian": "", "Toner Negro": "", "Kit Alim.": "", 'Estado': 'No Disponible', 'Marca de Tiempo': timestamp}
+        except WebDriverException:
+            print(f"Timeout al intentar conectar con {url}")
+            return {"IP": ip, "Toner Amarillo": "", "Toner Magenta": "", "Toner Cian": "", "Toner Negro": "", "Kit Alim.": "", 'Estado': 'Fuera de Red', 'Marca de Tiempo': timestamp}
+        finally:
+            driver.quit()
+
+    # Leer las hojas del archivo Excel
+    sheets = pd.read_excel(file_path, sheet_name=None)
+    wb = load_workbook(file_path)
+    column_widths = {sheet_name: get_column_widths(
+        wb[sheet_name]) for sheet_name in wb.sheetnames}
+
+    # Procesar la hoja 'Color Admin'
+    df_original = sheets['Color Planta']
+    df_original['IP'] = df_original['IP'].astype(str).apply(format_ip)
+    df_filtered = df_original[df_original['IP'].notna()]
+
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_ip = {executor.submit(
+            fetch_data_from_url, ip, options): ip for ip in df_filtered['IP']}
+        results = [future.result() for future in as_completed(future_to_ip)]
+
+    df_results = pd.DataFrame(results)
+
+    # Verificar que las columnas 'IP' existan antes de hacer el merge
+    if 'IP' not in df_original.columns or 'IP' not in df_results.columns:
+        raise KeyError("'IP' column is missing in one of the DataFrames.")
+
+    # Fusionar los resultados
+    df_updated = df_original.merge(
+        df_results, on='IP', how='left', suffixes=('', '_new')
+    )
+
+    # Restablecer columnas NaN
+    columns = ['Toner Amarillo', 'Toner Magenta', 'Toner Cian','Toner Negro', 'Kit Alim.', 'Estado', 'Marca de Tiempo']
+    df_updated[columns] = df_updated[columns].fillna('')
+
+    mask_ok = df_updated['Estado_new'] == 'OK'
+    columns = ['Toner Amarillo', 'Toner Magenta', 'Toner Cian','Toner Negro', 'Kit Alim.']
+
+    # 🔹 Crear las columnas *_new si no existen
+    for col in columns:
+        new_col = f"{col}_new"
+        if new_col not in df_updated.columns:
+            df_updated[new_col] = None
+
+    # 🔹 Actualizar valores
+    for col in columns:
+        df_updated[col] = df_updated[col].astype(str)
+        df_updated.loc[mask_ok, col] = df_updated.loc[mask_ok,
+                                                      f'{col}_new'].apply(clean_percentage)
+
+    df_updated['Estado'] = df_updated['Estado_new'].fillna(
+        df_updated['Estado'])
+    df_updated['Marca de Tiempo'] = df_updated['Marca de Tiempo_new'].fillna(
+        df_updated['Marca de Tiempo'])
+
+    columns_to_drop = [f'{col}_new' for col in columns +
+                       ['Estado', 'Marca de Tiempo']]
+    df_updated.drop(columns=[
+                    col for col in columns_to_drop if col in df_updated.columns], inplace=True)
+
+    # Guardar el DataFrame actualizado
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        df_updated.to_excel(
+            writer, sheet_name='Color Planta', index=False)
+        for sheet_name, df_sheet in sheets.items():
+            if sheet_name != 'Color Planta':
                 df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
 
     # Aplicar fórmulas y formatos preservados
@@ -523,19 +748,22 @@ def format_excel_sheets(file_path):
         for col, width in column_widths.items():
             ws.column_dimensions[col].width = width
 
-    # Asegurar que "Impresoras Normales" esté al principio
-    if "Impresoras Normales" in wb.sheetnames:
-        wb.move_sheet("Impresoras Normales", offset=-
-                      wb.index(wb["Impresoras Normales"]))
+    # Asegurar que "HP Admin" esté al principio
+    if "HP Admin" in wb.sheetnames:
+        wb.move_sheet("HP Admin", offset=-
+                      wb.index(wb["HP Admin"]))
 
     wb.save(file_path)
     print("Formato aplicado y archivo guardado.")
 
 
-#input_file = r"C:\Users\jvargas\Downloads\Impresoras - final (2).xlsx"
+#input_file = r"C:\Users\jvargas\Downloads\Impresoras - final.xlsx"
 input_file = r"G:\Unidades compartidas\Informática\Impresoras - final.xlsx"
 
-procesar_impresoras_colores_clx(input_file, input_file)
-procesar_impresoras_colores(input_file, input_file)
-procesar_impresoras_normales(input_file)
+
+procesar_impresoras_hp(input_file, input_file)
+procesar_color_planta(input_file, input_file)
+procesar_planta(input_file, input_file)
+procesar_impresoras_hp_grandes(input_file, input_file)
+procesar_color_admin(input_file, input_file)
 format_excel_sheets(input_file)
