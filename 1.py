@@ -20,6 +20,8 @@ num_version = "139.0.7258.139"
 CHROMEDRIVER_PATH = ChromeDriverManager(
     driver_version=num_version).install()
 
+# Configura el driver y el navegador
+
 
 def configurar_driver(num_version: str):
     options = webdriver.ChromeOptions()
@@ -40,6 +42,8 @@ def configurar_driver(num_version: str):
     )
 
     return driver
+
+# Función para formatear la IP
 
 
 def format_ip(ip):
@@ -63,6 +67,8 @@ def format_ip(ip):
     else:
         return ip
 
+# Función para configurar el ancho de las columnas
+
 
 def get_column_widths(ws):
     widths = {}
@@ -78,6 +84,8 @@ def get_column_widths(ws):
         widths[column] = max_length + 2  # Adding a bit more space
     return widths
 
+# Funciones para preservar y aplicar fórmulas y formatos
+
 
 def preserve_formulas_and_formats(input_file):
     wb = load_workbook(input_file, data_only=False)
@@ -88,6 +96,8 @@ def preserve_formulas_and_formats(input_file):
                           'f' else cell.value for row in ws.iter_rows() for cell in row}
         formulas[sheet_name] = sheet_formulas
     return formulas
+
+# Aplicar fórmulas y formatos preservados
 
 
 def apply_formulas_and_formats(output_file, formulas):
@@ -678,11 +688,13 @@ def procesar_color_planta(file_path, output_file):
     )
 
     # Restablecer columnas NaN
-    columns = ['Toner Amarillo', 'Toner Magenta', 'Toner Cian','Toner Negro', 'Kit Alim.', 'Estado', 'Marca de Tiempo']
+    columns = ['Toner Amarillo', 'Toner Magenta', 'Toner Cian',
+        'Toner Negro', 'Kit Alim.', 'Estado', 'Marca de Tiempo']
     df_updated[columns] = df_updated[columns].fillna('')
 
     mask_ok = df_updated['Estado_new'] == 'OK'
-    columns = ['Toner Amarillo', 'Toner Magenta', 'Toner Cian','Toner Negro', 'Kit Alim.']
+    columns = ['Toner Amarillo', 'Toner Magenta',
+        'Toner Cian', 'Toner Negro', 'Kit Alim.']
 
     # 🔹 Crear las columnas *_new si no existen
     for col in columns:
@@ -733,6 +745,12 @@ def format_excel_sheets(file_path):
                 cell_value = str(cell.value).strip()
               # Comprobar si el valor es '0%' o '0' para aplicar el texto rojo
                 if cell_value in ['0%', '0']:
+                    cell.font = red_font
+                    print(
+                        f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
+
+                # Comprobar si el valor es menor al 5% para aplicar el texto rojo
+                elif cell_value.endswith('%') and float(cell_value[:-1]) < 5:
                     cell.font = red_font
                     print(
                         f"Formato aplicado a celda: {cell.coordinate}, Valor: '{cell_value}' en hoja {sheet_name}")
