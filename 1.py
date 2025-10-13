@@ -234,6 +234,8 @@ def procesar_impresoras_hp(file_path, output_file):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
+    # FUNCIONA
+    registrar_historico(file_path, df_updated)
 
 
 def procesar_impresoras_hp_grandes(file_path, output_file):
@@ -345,6 +347,8 @@ def procesar_impresoras_hp_grandes(file_path, output_file):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
+    # REVISANDO
+    registrar_historico(file_path, df_updated)
 
 
 def procesar_color_admin(file_path, output_file):
@@ -477,7 +481,7 @@ def procesar_color_admin(file_path, output_file):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
-
+    registrar_historico(output_file, df_updated)
 
 def procesar_planta(file_path, output_file):
 
@@ -593,6 +597,8 @@ def procesar_planta(file_path, output_file):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
+    # NO FUNCIONA
+    registrar_historico(output_file, df_updated)
 
 
 def procesar_color_planta(file_path, output_file):
@@ -689,12 +695,12 @@ def procesar_color_planta(file_path, output_file):
 
     # Restablecer columnas NaN
     columns = ['Toner Amarillo', 'Toner Magenta', 'Toner Cian',
-        'Toner Negro', 'Kit Alim.', 'Estado', 'Marca de Tiempo']
+               'Toner Negro', 'Kit Alim.', 'Estado', 'Marca de Tiempo']
     df_updated[columns] = df_updated[columns].fillna('')
 
     mask_ok = df_updated['Estado_new'] == 'OK'
     columns = ['Toner Amarillo', 'Toner Magenta',
-        'Toner Cian', 'Toner Negro', 'Kit Alim.']
+               'Toner Cian', 'Toner Negro', 'Kit Alim.']
 
     # 🔹 Crear las columnas *_new si no existen
     for col in columns:
@@ -729,6 +735,8 @@ def procesar_color_planta(file_path, output_file):
     # Aplicar fórmulas y formatos preservados
     formulas = preserve_formulas_and_formats(file_path)
     apply_formulas_and_formats(output_file, formulas)
+    # NO FUNCIONA
+    registrar_historico(file_path, df_updated)
 
 
 def format_excel_sheets(file_path):
@@ -773,6 +781,51 @@ def format_excel_sheets(file_path):
 
     wb.save(file_path)
     print("Formato aplicado y archivo guardado.")
+
+
+def registrar_historico(output_file, df_actual):
+    """
+    Guarda los niveles actuales de tóner en una hoja llamada 'Histórico' 
+    dentro del mismo archivo Excel, sin borrar los registros anteriores.
+    """
+
+    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df_historico_nuevo = df_actual.copy()
+
+    # Seleccionar solo las columnas relevantes para el histórico
+    columnas_historico = ['Nombre','IP', 'Toner Negro', 'Estado', 'Marca de Tiempo']
+    df_historico_nuevo = df_historico_nuevo[[
+        col for col in columnas_historico if col in df_historico_nuevo.columns]]
+
+    try:
+        # Intenta leer el archivo y la hoja 'Histórico'
+        try:
+            with pd.ExcelWriter(output_file, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
+                # Si la hoja 'Histórico' ya existe, leerla
+                try:
+                    existing_df = pd.read_excel(
+                        output_file, sheet_name="Histórico")
+                    # Concatenar los datos antiguos con los nuevos
+                    df_final = pd.concat(
+                        [existing_df, df_historico_nuevo], ignore_index=True)
+                except ValueError:
+                    # La hoja existe pero está vacía, o no existe. Usar solo los nuevos datos.
+                    df_final = df_historico_nuevo
+
+                # Escribir la hoja combinada
+                df_final.to_excel(writer, sheet_name="Histórico", index=False)
+
+        except FileNotFoundError:
+            # Si el archivo no existe, crearlo y agregar la hoja 'Histórico'
+            with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+                df_historico_nuevo.to_excel(
+                    writer, sheet_name="Histórico", index=False)
+
+        print(
+            f"✅ Registro histórico agregado ({len(df_historico_nuevo)} filas).")
+
+    except Exception as e:
+        print(f"❌ Ocurrió un error al registrar el histórico: {e}")
 
 
 #input_file = r"C:\Users\jvargas\Downloads\Impresoras - final.xlsx"
