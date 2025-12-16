@@ -13,6 +13,8 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 import numpy as np
 from sklearn.linear_model import LinearRegression
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 
 # Obtener la fecha y hora actual
@@ -839,58 +841,93 @@ def registrar_historico(output_file, df_actual):
         print(f"❌ Ocurrió un error al registrar el histórico: {e}")
 
 
-def predecir_consumible(sub_df, consumible):
-    sub_df = sub_df.sort_values("Fecha de registro")
-    sub_df = sub_df[["Fecha de registro", consumible]].dropna()
-    sub_df[consumible] = pd.to_numeric(sub_df[consumible].astype(
-        str).str.replace("%", ""), errors="coerce")
-    sub_df = sub_df.dropna()
+def predecir_consumible(sub_df, consumible, VENTANA_EMA, MAX_DIAS_PREDICCION):
+
+    sub_df = (
+        sub_df[["Fecha de registro", consumible]]
+        .dropna()
+        .sort_values("Fecha de registro")
+        .copy()
+    )
 
     if len(sub_df) < 2:
         return np.nan, np.nan, np.nan, np.nan, "❌ Muy pocos datos"
 
-    # Crear eje temporal en días
-    sub_df["Días"] = (sub_df["Fecha de registro"] -
-                      sub_df["Fecha de registro"].min()).dt.total_seconds() / (24*3600)
-    X = sub_df[["Días"]].values
+    sub_df["Días"] = (
+        sub_df["Fecha de registro"] - sub_df["Fecha de registro"].min()
+    ).dt.total_seconds() / 86400
+
     y = sub_df[consumible].values
-
-    # Elegir método según número de registros
-    if len(sub_df) >= 3:
-        model = LinearRegression()
-        model.fit(X, y)
-        consumo_diario = -model.coef_[0]  # Pendiente negativa
-        metodo = "📈 Regresión lineal"
-    else:
-        delta_pct = y[-2] - y[-1]
-        delta_days = sub_df["Días"].iloc[-1] - sub_df["Días"].iloc[-2]
-        consumo_diario = delta_pct / delta_days if delta_days > 0 else np.nan
-        metodo = "⚙️ Promedio simple"
-
     porcentaje_actual = y[-1]
-    if consumo_diario <= 0 or np.isnan(consumo_diario):
+
+    sub_df["Delta_Pct"] = sub_df[consumible].diff() * -1
+    sub_df["Delta_Dias"] = sub_df["Días"].diff()
+
+    sub_df = sub_df[sub_df["Delta_Dias"] > 0]
+    sub_df["Tasa"] = sub_df["Delta_Pct"] / sub_df["Delta_Dias"]
+
+    consumo_diario = (
+        sub_df["Tasa"]
+        .ewm(span=VENTANA_EMA, adjust=False)
+        .mean()
+        .iloc[-1]
+        if not sub_df.empty
+        else np.nan
+    )
+
+    metodo = f"⭐ EMA (span={VENTANA_EMA})"
+
+    if np.isnan(consumo_diario) or consumo_diario <= 0:
+        if len(sub_df) >= 3:
+            X = sub_df[["Días"]].values
+            model = LinearRegression()
+            model.fit(X, y[:len(X)])
+            consumo_diario = -model.coef_[0]
+            metodo = "📈 Regresión Lineal (Fallback)"
+        else:
+            metodo = "❌ Pendiente inválida"
+            return porcentaje_actual, 0, np.nan, np.nan, metodo
+
+    if consumo_diario <= 0:
         return porcentaje_actual, 0, np.nan, np.nan, metodo
 
     dias_restantes = porcentaje_actual / consumo_diario
-    fecha_agotamiento = sub_df["Fecha de registro"].iloc[-1] + \
-        timedelta(days=dias_restantes)
 
-    return round(porcentaje_actual, 1), round(consumo_diario, 2), round(dias_restantes, 1), fecha_agotamiento, metodo
+    if dias_restantes > MAX_DIAS_PREDICCION:
+        return (
+            round(porcentaje_actual, 1),
+            round(consumo_diario, 6),
+            round(dias_restantes, 1),
+            pd.NaT,
+            f"{metodo} - Proyección no confiable"
+        )
+
+    fecha_fin = sub_df["Fecha de registro"].iloc[-1] + timedelta(days=dias_restantes)
 
 
-def predecir_consumible_promedio(CONSUMIBLES, df, OUTPUT_FILE):
+    return (
+        round(porcentaje_actual, 1),
+        round(consumo_diario, 4),
+        round(dias_restantes, 1),
+        fecha_fin,
+        metodo
+    )
+
+
+def predecir_consumible_promedio(CONSUMIBLES, df, OUTPUT_FILE, DIAS_ALERTA_CRITICA, DIAS_ALERTA_MEDIA, VENTANA_EMA, MAX_DIAS_PREDICCION):
     # --- GENERAR PREDICCIONES ---
     resultados = []
 
-    for (ip, modelo), grupo in df.groupby(["IP", "Modelo"], dropna=False):
-        # Definir nombre si existe columna, si no usar IP
-        nombre = grupo["Nombre"].iloc[0] if "Nombre" in grupo.columns else ip
+    for (ip, modelo), grupo in df.groupby(["IP", "Modelo"]):
+        nombre = grupo["Nombre"].iloc[0] if "Nombre" in grupo else ip
 
         for consumible in CONSUMIBLES:
-            if consumible not in grupo.columns or grupo[consumible].dropna().empty:
+            if consumible not in grupo or grupo[consumible].dropna().empty:
                 continue
+
             pct, consumo, dias, fecha_fin, metodo = predecir_consumible(
-                grupo, consumible)
+                grupo, consumible, VENTANA_EMA, MAX_DIAS_PREDICCION)
+
             resultados.append({
                 "Nombre": nombre,
                 "IP": ip,
@@ -905,42 +942,74 @@ def predecir_consumible_promedio(CONSUMIBLES, df, OUTPUT_FILE):
 
     df_pred = pd.DataFrame(resultados)
 
-    # --- AGREGAR ALERTAS ---
-    df_pred["Alerta"] = np.where(
-        df_pred["Días restantes estimados"] <= 3, "⚠️ Reemplazar pronto", "OK")
+        # --------------------------------------------------
+        # ALERTAS
+        # --------------------------------------------------
 
-    # --- GUARDAR RESULTADOS ---
+
+    def generar_alerta(dias):
+            if pd.isna(dias):
+                return "❓ Datos insuficientes"
+            if dias <= DIAS_ALERTA_CRITICA:
+                return "🚨 REEMPLAZAR URGENTE"
+            if dias <= DIAS_ALERTA_MEDIA:
+                return "⚠️ Reemplazar pronto"
+            if dias <= 15:
+                return "🔔 Bajo stock (2 semanas)"
+            return "🟢 OK"
+
+
+    df_pred["Alerta"] = df_pred["Días restantes estimados"].apply(generar_alerta)
+
+        # --------------------------------------------------
+        # GUARDAR RESULTADOS
+        # --------------------------------------------------
     df_pred.to_excel(OUTPUT_FILE, index=False)
     print(f"✅ Predicciones guardadas en: {OUTPUT_FILE}")
+
 
 
 def menu():
    # input_file = r"C:\Users\jvargas\Downloads\Impresoras - final.xlsx"
     input_file = r"G:\Unidades compartidas\Informática\Impresoras - final.xlsx"
 
-    OUTPUT_FILE = "predicciones_toner.xlsx"
+    OUTPUT_FILE = "predicciones_toner_ema.xlsx"
 
-    # Consumibles a revisar
     TONER_COLUMNS = ["Toner Negro", "Toner Cian",
-                     "Toner Magenta", "Toner Amarillo"]
+                    "Toner Magenta", "Toner Amarillo"]
     KITS_COLUMNS = ["Kit Mant.", "Kit Alim."]
     CONSUMIBLES = TONER_COLUMNS + KITS_COLUMNS
 
     ESTADO_VALIDO = "OK"
+    VENTANA_EMA = 10
+    DIAS_ALERTA_CRITICA = 3
+    DIAS_ALERTA_MEDIA = 7
+    MAX_DIAS_PREDICCION = 365 * 2  # máximo 2 años
 
-    # --- CARGA DE DATOS ---
-    try:
-        df = pd.read_excel(input_file, sheet_name="Histórico")
-    except Exception as e:
-        raise Exception(f"Error al leer el archivo histórico: {e}")
 
-    # Normalizar nombres de columnas y fechas
-    df.columns = [col.strip() for col in df.columns]
+    # --------------------------------------------------
+    # CARGA Y LIMPIEZA DE DATOS
+    # --------------------------------------------------
+    df = pd.read_excel(input_file, sheet_name="Histórico")
+    df.columns = df.columns.str.strip()
+
     df["Fecha de registro"] = pd.to_datetime(
         df["Marca de Tiempo"], errors="coerce")
+    df = df[df["Estado"].str.strip() == ESTADO_VALIDO].copy()
 
-    # Filtrar registros válidos
-    df = df[df["Estado"] == ESTADO_VALIDO]
+    for col in CONSUMIBLES:
+        df[col] = (
+            df[col]
+            .astype(str)
+            .str.replace("%", "", regex=False)
+            .str.strip()
+            .replace("", np.nan)
+            .astype(float)
+        )
+
+    df.sort_values("Fecha de registro", ascending=False, inplace=True)
+    df.drop_duplicates(subset=["IP", "Marca de Tiempo"],
+                    keep="first", inplace=True)
 
     while True:
         print("\n===== MENÚ =====")
@@ -958,7 +1027,7 @@ def menu():
             format_excel_sheets(input_file)
 
         elif opcion == "2":
-            predecir_consumible_promedio(CONSUMIBLES, df, OUTPUT_FILE)
+            predecir_consumible_promedio(CONSUMIBLES, df, OUTPUT_FILE, DIAS_ALERTA_CRITICA, DIAS_ALERTA_MEDIA, VENTANA_EMA, MAX_DIAS_PREDICCION)
         elif opcion == "0":
             print("👋 Saliendo...")
             break
